@@ -187,10 +187,37 @@
 
   ---
 
+  ## ❓ Troubleshooting
+
+  ### Clips save to "Desktop" instead of game folder?
+
+  Some games with **anti-cheat protection** (Easy Anti-Cheat, Vanguard, etc.) block the script from reading the process name. If the game isn't in our built-in list, it will fall back to "Desktop".
+
+  **Solution:** Add a Custom Name mapping:
+
+  1. Open OBS → Tools → Scripts → Click on the script
+  2. In **CUSTOM NAMES** section, enter:
+     - Game: `*Your Game Name*` (with asterisks)
+     - Folder: `Your Game Name`
+  3. Click **Add**
+
+  **Examples:**
+  | Game | Folder |
+  |------|--------|
+  | `*Sea of Thieves*` | `Sea of Thieves` |
+  | `*New World*` | `New World` |
+  | `*PUBG*` | `PUBG` |
+
+  > 💡 The `*pattern*` mode matches the window title, which works even when anti-cheat blocks process detection!
+
+  ---
+
   ## 📋 Changelog
 
   ### v2.6.4
-  - 🛡️ **Fixed crashes** with anti-cheat games (Marvel Rivals, Valorant, Fortnite)
+  - 🎮 **Window Title Fallback** — Games with anti-cheat (Sea of Thieves, etc.) now detected via window title
+  - 🛡️ **Smarter Detection** — Better distinction between ignored apps (Explorer, Discord) and anti-cheat blocked games
+  - 🐛 **Fixed** Explorer folders with game names no longer confused with actual games
   - 🎨 **Redesigned UI** — Cleaner Custom Names section
   - 💾 **New BACKUP section** — Import/Export moved to dedicated group
   - 🔧 **Improved stability** — Better error handling for all operations
