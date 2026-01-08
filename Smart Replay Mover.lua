@@ -1,5 +1,5 @@
 -- ============================================================================
--- Smart Replay Mover v2.7.0
+-- Smart Replay Mover v2.7.1
 -- Simple, safe, and reliable replay buffer organizer for OBS
 -- ============================================================================
 --
@@ -4403,7 +4403,7 @@ function script_description()
     return [[
 <center>
 <p style="font-size:24px; font-weight:bold; color:#00d4aa;">SMART REPLAY MOVER</p>
-<p style="color:#888;">Automatic Game Clip Organizer v2.7.0</p>
+<p style="color:#888;">Automatic Game Clip Organizer v2.7.1</p>
 </center>
 
 <hr style="border-color:#333;">
@@ -4634,7 +4634,7 @@ function script_load(settings)
         for _ in pairs(GAME_DATABASE) do db_count = db_count + 1 end
     end
 
-    log("Smart Replay Mover v2.7.0 loaded (GPL v3 - github.com/SlonickLab/Smart-Replay-Mover)")
+    log("Smart Replay Mover v2.7.1 loaded (GPL v3 - github.com/SlonickLab/Smart-Replay-Mover)")
     log("Database: " .. db_count .. " games | Custom: " .. custom_count .. " mappings")
     log("Prefix: " .. (CONFIG.add_game_prefix and "ON" or "OFF") ..
         " | Recordings: " .. (CONFIG.organize_recordings and "ON" or "OFF") ..
@@ -4663,7 +4663,7 @@ function script_unload()
 end
 
 -- ============================================================================
--- END OF SCRIPT v2.7.0
+-- END OF SCRIPT v2.7.1
 -- Copyright (C) 2025-2026 SlonickLab - Licensed under GPL v3
 -- https://github.com/SlonickLab/Smart-Replay-Mover
 -- ============================================================================
