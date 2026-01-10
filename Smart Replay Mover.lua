@@ -1,5 +1,5 @@
 -- ============================================================================
--- Smart Replay Mover v2.7.1
+-- Smart Replay Mover v2.7.2
 -- Simple, safe, and reliable replay buffer organizer for OBS
 -- ============================================================================
 --
@@ -30,6 +30,11 @@
 -- Plagiarism or removal of this notice violates the license terms.
 --
 -- ============================================================================
+-- CHANGELOG v2.7.2:
+--   - Added FFmpeg Thumbnail support (embeds cover art into videos)
+--   - New "Advanced" settings tab for FFmpeg configuration
+--   - Safer file move operations with fallbacks
+--
 -- CHANGELOG v2.7.0:
 --   - Merged all files into single unified script
 --   - Embedded game database (1876 games) - no external file loading
@@ -74,6 +79,10 @@ local CONFIG = {
     show_notifications = true,
     play_sound = false,
     notification_duration = 3.0,
+    -- FFmpeg settings
+    enable_thumbnails = false,
+    thumbnail_offset = 10.0,
+    ffmpeg_path = "",
 }
 
 local GAME_DATABASE = {
@@ -2623,6 +2632,7 @@ end
 -- ============================================================================
 
 local last_save_time = 0
+local last_screenshot_time = 0
 local last_recording_time = 0  -- Separate cooldown for recordings
 local files_moved = 0
 local files_skipped = 0
@@ -2703,6 +2713,7 @@ ffi.cdef[[
     int MultiByteToWideChar(unsigned int CodePage, DWORD dwFlags, LPCSTR lpMultiByteStr, int cbMultiByte, LPWSTR lpWideCharStr, int cchWideChar);
     int WideCharToMultiByte(unsigned int CodePage, DWORD dwFlags, const wchar_t* lpWideCharStr, int cchWideChar, char* lpMultiByteStr, int cbMultiByte, const char* lpDefaultChar, int* lpUsedDefaultChar);
     BOOL DeleteFileW(LPCWSTR lpFileName);
+    BOOL IsWindow(HWND hWnd);
 
     typedef struct {
         DWORD dwFileAttributes;
@@ -2984,8 +2995,10 @@ local function hide_notification()
     notification_window_shown = false
 
     pcall(function()
-        user32.ShowWindow(hwnd, SW_HIDE)
-        user32.DestroyWindow(hwnd)
+        if user32.IsWindow(hwnd) then
+            user32.ShowWindow(hwnd, SW_HIDE)
+            user32.DestroyWindow(hwnd)
+        end
     end)
 
     notification_hwnd = nil
@@ -3802,6 +3815,180 @@ local function get_file_size(path)
     return ok and result or 0
 end
 
+-- ============================================================================
+-- FFMPEG SUPPORT (FFI / Sync ShellExecuteEx Method)
+-- ============================================================================
+
+ffi.cdef[[
+    typedef void* HANDLE;
+    typedef void* HWND;
+    typedef void* HINSTANCE;
+    typedef unsigned long DWORD;
+    
+    typedef struct {
+        DWORD cbSize;
+        DWORD fMask;
+        HWND hwnd;
+        const char* lpVerb;
+        const char* lpFile;
+        const char* lpParameters;
+        const char* lpDirectory;
+        int nShow;
+        HINSTANCE hInstApp;
+        void* lpIDList;
+        const char* lpClass;
+        HANDLE hkeyClass;
+        DWORD dwHotKey;
+        union {
+            HANDLE hIcon;
+            HANDLE hMonitor;
+        } DUMMYUNIONNAME;
+        HANDLE hProcess;
+    } SHELLEXECUTEINFOA;
+
+    int ShellExecuteExA(SHELLEXECUTEINFOA* pExecInfo);
+    DWORD WaitForSingleObject(HANDLE hHandle, DWORD dwMilliseconds);
+    int CloseHandle(HANDLE hObject);
+]]
+
+local shell32 = ffi.load("shell32")
+local kernel32 = ffi.load("kernel32")
+
+-- Constants
+local SEE_MASK_NOCLOSEPROCESS = 0x00000040
+local SW_HIDE = 0
+local INFINITE = 0xFFFFFFFF
+
+local function is_video_file(path)
+    if not path then return false end
+    local ext = string.lower(string.match(path, "%.([^.]+)$") or "")
+    local video_exts = {
+        ["mp4"] = true, ["mkv"] = true, ["mov"] = true, ["flv"] = true,
+        ["ts"] = true, ["m3u8"] = true, ["avi"] = true, ["webm"] = true
+    }
+    return video_exts[ext] or false
+end
+
+local function run_task_sync_hidden(commands, unique_id)
+    local temp_dir = os.getenv("TEMP") or os.getenv("TMP") or "C:\\Temp"
+    local bat_path = temp_dir .. "\\srm_sync_" .. unique_id .. ".bat"
+
+    local f_bat = io.open(bat_path, "w")
+    if not f_bat then
+        log("ERROR: Could not create temp batch file")
+        return false
+    end
+    
+    f_bat:write("@echo off\n")
+    -- chcp 65001 is critical for non-English filenames
+    f_bat:write("chcp 65001 > nul\n")
+    
+    for _, cmd in ipairs(commands) do
+        f_bat:write(cmd .. "\n")
+        f_bat:write("if %errorlevel% neq 0 exit /b %errorlevel%\n")
+    end
+    f_bat:close()
+
+    -- Prepare ShellExecuteEx structure
+    local sei = ffi.new("SHELLEXECUTEINFOA")
+    sei.cbSize = ffi.sizeof("SHELLEXECUTEINFOA")
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS -- We need the process handle to wait
+    sei.hwnd = nil
+    sei.lpVerb = "open"
+    sei.lpFile = "cmd.exe"
+    sei.lpParameters = "/c \"" .. bat_path .. "\""
+    sei.lpDirectory = nil
+    sei.nShow = SW_HIDE
+    sei.hInstApp = nil
+
+    -- Execute
+    if shell32.ShellExecuteExA(sei) ~= 0 then
+        -- Wait for finish (Blocking)
+        if sei.hProcess ~= nil then
+            kernel32.WaitForSingleObject(sei.hProcess, INFINITE)
+            kernel32.CloseHandle(sei.hProcess)
+        end
+        
+        -- Cleanup
+        os.remove(bat_path)
+        return true
+    else
+        log("ERROR: ShellExecuteEx failed")
+        os.remove(bat_path)
+        return false
+    end
+end
+
+local function run_ffmpeg_thumbnail(ffmpeg_path, src, target, offset)
+    if not ffmpeg_path or ffmpeg_path == "" then return false end
+
+    -- Path correction
+    local lower_path = string.lower(ffmpeg_path)
+    if not string.match(lower_path, "%.exe$") then
+        local try_bin = ffmpeg_path .. "/ffmpeg.exe"
+        local try_bin_sub = ffmpeg_path .. "/bin/ffmpeg.exe"
+        if obs.os_file_exists(try_bin) then ffmpeg_path = try_bin
+        elseif obs.os_file_exists(try_bin_sub) then ffmpeg_path = try_bin_sub end
+    end
+
+    math.randomseed(os.time() + (os.clock() * 1000))
+    local unique_id = tostring(os.time()) .. "_" .. tostring(math.random(1000, 9999))
+    local temp_thumb = src .. "." .. unique_id .. ".thumb.jpg"
+    
+    local commands = {}
+    
+    table.insert(commands, string.format('"%s" -sseof -%.1f -i "%s" -vframes 1 -q:v 2 -y "%s"',
+        ffmpeg_path, offset, src, temp_thumb))
+        
+    -- Embed and Move
+    -- Logic depends on container type:
+    -- MKV supports "Attachments" (Best for Cover Art support in Windows/Icaros)
+    -- MP4 requires "Video Stream" with Disposition (Apple/Standard style)
+    
+    local is_mkv = string.match(string.lower(src), "%.mkv$") ~= nil
+    local cmd_embed = ""
+    
+    if is_mkv then
+        -- MKV Strategy: Use -attach for true Matroska attachments
+        -- -c copy: Copy video/audio streams
+        -- -attach: Attach the thumbnail file
+        -- -metadata:s:t:0 mimetype: Set MIME type for the FIRST attachment stream explicitly
+        -- -metadata:s:t:0 filename: Naming it "cover.jpg" or "cover.png" helps detection
+        cmd_embed = string.format('"%s" -i "%s" -map 0 -c copy -attach "%s" -metadata:s:t:0 mimetype=image/jpeg -metadata:s:t:0 filename="cover.jpg" -y "%s"',
+            ffmpeg_path, src, temp_thumb, target)
+    else
+        -- MP4/Other Strategy: Use stream mapping
+        cmd_embed = string.format('"%s" -i "%s" -i "%s" -map 0 -map 1 -c:v:0 copy -c:a copy -c:v:1 mjpeg -disposition:v:1 attached_pic -metadata:s:v:1 title="Cover Art" -y "%s"',
+            ffmpeg_path, src, temp_thumb, target)
+    end
+        
+    table.insert(commands, cmd_embed)
+    
+    -- Sync Logic: We manage files in Lua now because we WAIT for completion
+    -- No "del" commands in batch needed for result files, only temps
+    
+    dbg("Processing Thumbnail (Sync): " .. unique_id)
+    
+    -- Run it!
+    run_task_sync_hidden(commands, unique_id)
+    
+    -- Cleanup temp thumb
+    os.remove(temp_thumb)
+    
+    -- Validation (Now safe because process is guaranteed finished)
+    if obs.os_file_exists(target) then
+        local src_size = get_file_size(src)
+        local target_size = get_file_size(target)
+        
+        -- If target is valid (not empty and reasonable size)
+        if target_size > (src_size * 0.9) then
+            return true
+        end
+    end
+    
+    return false 
+end
+
 local function move_file(src, folder_name, game_name)
     local ok, result = pcall(function()
         src = string.gsub(src, "\\", "/")
@@ -3876,6 +4063,29 @@ local function move_file(src, folder_name, game_name)
             dbg("Date subfolder ready: " .. target_dir)
         end
 
+        -- FFMPEG THUMBNAIL LOGIC
+        if CONFIG.enable_thumbnails and is_video_file(src) and CONFIG.ffmpeg_path ~= "" then
+            log("Attempting to embed thumbnail with FFmpeg...")
+            if run_ffmpeg_thumbnail(CONFIG.ffmpeg_path, src, target_path, CONFIG.thumbnail_offset) then
+                log("Thumbnail embedded successfully!")
+                log("Moved (FFmpeg): " .. new_filename)
+                log("To: " .. target_dir)
+                
+                -- Delete original source file since FFmpeg created a new one
+                os.remove(src)
+                
+                files_moved = files_moved + 1
+                return true
+            else
+                log("FFmpeg failed or produced invalid file. Falling back to standard move.")
+                -- Clean up potential failed target file
+                if obs.os_file_exists(target_path) then
+                    os.remove(target_path)
+                end
+            end
+        end
+
+        -- STANDARD MOVE (Fallback)
         if obs.os_rename(src, target_path) then
             log("Moved: " .. new_filename)
             log("To: " .. target_dir)
@@ -4091,12 +4301,22 @@ local function on_event(event)
 
         elseif event == obs.OBS_FRONTEND_EVENT_SCREENSHOT_TAKEN then
             if CONFIG.organize_screenshots then
+                local now = os.time()
+                local diff = now - last_screenshot_time
+
+                if diff < CONFIG.duplicate_cooldown then
+                    dbg("Screenshot spam detected, skipping organization")
+                    return
+                end
+
+                last_screenshot_time = now
+
                 local path = obs.obs_frontend_get_last_screenshot()
                 if path then
                     local raw_game, window_title, skip_fallback = detect_game()
                     local folder_name = get_game_folder(raw_game, window_title, skip_fallback)
 
-                    process_file(path)
+                    process_file_with_game(path, folder_name, raw_game)
 
                     notify("Screenshot Saved", "Moved to: " .. folder_name)
                 end
@@ -4403,7 +4623,7 @@ function script_description()
     return [[
 <center>
 <p style="font-size:24px; font-weight:bold; color:#00d4aa;">SMART REPLAY MOVER</p>
-<p style="color:#888;">Automatic Game Clip Organizer v2.7.1</p>
+<p style="color:#888;">Automatic Game Clip Organizer v2.7.2</p>
 </center>
 
 <hr style="border-color:#333;">
@@ -4551,6 +4771,27 @@ function script_properties()
     obs.obs_properties_add_group(props, "tools_section",
         "🔧  TOOLS & DEBUG", obs.OBS_GROUP_NORMAL, tools_group)
 
+    -- FFMPEG GROUP (Advanced)
+    local ffmpeg_group = obs.obs_properties_create()
+
+    obs.obs_properties_add_bool(ffmpeg_group, "enable_thumbnails",
+        "🖼️  Embed Video Dictionary (Thumbnail)")
+
+    local p_offset = obs.obs_properties_add_float_slider(ffmpeg_group, "thumbnail_offset",
+        "⏱️  Thumbnail Offset (seconds from end)",
+        1.0, 60.0, 1.0)
+    
+    obs.obs_properties_add_path(ffmpeg_group, "ffmpeg_path",
+        "📂  FFmpeg Executable Path (ffmpeg.exe)",
+        obs.OBS_PATH_FILE, "Executables (*.exe);;All Files (*.*)", nil)
+
+    local p_info = obs.obs_properties_add_text(ffmpeg_group, "ffmpeg_info",
+        "Note: Requires FFmpeg installed. Adds processing time regarding disk speed.",
+        obs.OBS_TEXT_INFO)
+
+    obs.obs_properties_add_group(props, "ffmpeg_section",
+        "🎬  FFMPEG THUMBNAILS (Advanced)", obs.OBS_GROUP_NORMAL, ffmpeg_group)
+
     return props
 end
 
@@ -4566,6 +4807,9 @@ function script_defaults(settings)
     obs.obs_data_set_default_bool(settings, "show_notifications", true)
     obs.obs_data_set_default_bool(settings, "play_sound", false)
     obs.obs_data_set_default_double(settings, "notification_duration", 3.0)
+    obs.obs_data_set_default_bool(settings, "enable_thumbnails", false)
+    obs.obs_data_set_default_double(settings, "thumbnail_offset", 10.0)
+    obs.obs_data_set_default_string(settings, "ffmpeg_path", "")
 end
 
 function script_update(settings)
@@ -4582,6 +4826,9 @@ function script_update(settings)
     CONFIG.show_notifications = obs.obs_data_get_bool(settings, "show_notifications")
     CONFIG.play_sound = obs.obs_data_get_bool(settings, "play_sound")
     CONFIG.notification_duration = obs.obs_data_get_double(settings, "notification_duration")
+    CONFIG.enable_thumbnails = obs.obs_data_get_bool(settings, "enable_thumbnails")
+    CONFIG.thumbnail_offset = obs.obs_data_get_double(settings, "thumbnail_offset")
+    CONFIG.ffmpeg_path = obs.obs_data_get_string(settings, "ffmpeg_path")
 
     if CONFIG.fallback_folder == "" then
         CONFIG.fallback_folder = "Desktop"
@@ -4615,6 +4862,9 @@ function script_load(settings)
     CONFIG.show_notifications = obs.obs_data_get_bool(settings, "show_notifications")
     CONFIG.play_sound = obs.obs_data_get_bool(settings, "play_sound")
     CONFIG.notification_duration = obs.obs_data_get_double(settings, "notification_duration")
+    CONFIG.enable_thumbnails = obs.obs_data_get_bool(settings, "enable_thumbnails")
+    CONFIG.thumbnail_offset = obs.obs_data_get_double(settings, "thumbnail_offset")
+    CONFIG.ffmpeg_path = obs.obs_data_get_string(settings, "ffmpeg_path")
 
     if CONFIG.fallback_folder == "" then
         CONFIG.fallback_folder = "Desktop"
@@ -4634,7 +4884,7 @@ function script_load(settings)
         for _ in pairs(GAME_DATABASE) do db_count = db_count + 1 end
     end
 
-    log("Smart Replay Mover v2.7.1 loaded (GPL v3 - github.com/SlonickLab/Smart-Replay-Mover)")
+    log("Smart Replay Mover v2.7.2 loaded (GPL v3 - github.com/SlonickLab/Smart-Replay-Mover)")
     log("Database: " .. db_count .. " games | Custom: " .. custom_count .. " mappings")
     log("Prefix: " .. (CONFIG.add_game_prefix and "ON" or "OFF") ..
         " | Recordings: " .. (CONFIG.organize_recordings and "ON" or "OFF") ..
@@ -4663,7 +4913,7 @@ function script_unload()
 end
 
 -- ============================================================================
--- END OF SCRIPT v2.7.1
+-- END OF SCRIPT v2.7.2
 -- Copyright (C) 2025-2026 SlonickLab - Licensed under GPL v3
 -- https://github.com/SlonickLab/Smart-Replay-Mover
 -- ============================================================================
