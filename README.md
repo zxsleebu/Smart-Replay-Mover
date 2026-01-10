@@ -6,7 +6,7 @@
 
   **Automatically organize your Replay Buffer clips, Recordings, and Screenshots into game-specific folders.**
 
-  [![Version](https://img.shields.io/badge/version-2.7.0-00d4aa.svg)](https://github.com/SlonickLab/Smart-Replay-Mover/releases)
+  [![Version](https://img.shields.io/badge/version-2.7.2-00d4aa.svg)](https://github.com/SlonickLab/Smart-Replay-Mover/releases)
   [![License](https://img.shields.io/badge/license-GPL%20v3-blue.svg)](LICENSE)
   [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6.svg)]()
   [![OBS](https://img.shields.io/badge/OBS-28.x+-302E31.svg)](https://obsproject.com/)
@@ -55,6 +55,8 @@
   - **Regular Recordings** — Start/Stop recording support
   - **Screenshots** — Optional organization
   - **File Splitting** — Handles long recording segments correctly
+  - **🖼️ FFmpeg Thumbnails** — Optional cover art embedding for your clips
+
 
   ### 🛡️ Quality of Life
   - **Anti-Spam Protection** — Deletes duplicate files from panic-pressing hotkeys
@@ -111,6 +113,14 @@
   | Show popup | Visual notification (Borderless/Windowed only) |
   | Play sound | Audio notification (works in Fullscreen) |
   | Duration | How long popup stays visible (1-10 seconds) |
+  
+  ### 🎥 Advanced (FFmpeg)
+  | Setting | Description |
+  |---------|-------------|
+  | Enable Thumbnails | Embed frame from video as cover art |
+  | FFmpeg Path | Path to your `ffmpeg.exe` |
+  | Thumbnail Offset | Time (sec) to grab the frame from |
+
 
   ### 💾 Backup
   | Setting | Description |
@@ -215,6 +225,19 @@
 
   ## 📋 Changelog
 
+  ### v2.7.2
+  - **🖼️ Video Thumbnails** — Added FFmpeg support for embedding cover art into replays
+  - **🥷 Background Processing** — FFmpeg operations are completely silent and invisible
+  - **🛠️ Stability & Performance** — Fixed crashes during rapid screenshots in Fullscreen mode
+  - **🛡️ Enhanced Logic** — Integrated `IsWindow` validation and cooldowns for thread safety
+  - **📂 Safe File Handling** — Files are verified before original is removed
+  - **🔧 Auto-Correction** — Improved path handling for spaces and incorrect exe selection
+  
+  ### v2.7.1
+  - **🔧 Window Reuse** — Redesigned notification system to reuse windows instead of constant destroy/create
+  - **🐛 Crash Fix** — Fixed critical access violations when spamming notifications
+  - **🛡️ Validation** — Added `IsWindow` checks to timer callbacks and FFI definitions
+  
   ### v2.7.0
   - 📦 **All-In-One Package** — Single file with embedded database (no external dependencies!)
   - 🎮 **1800+ Games Database** — Massive built-in game library (~1876 games)
@@ -224,14 +247,14 @@
   - 🔧 **Cleaner Code** — Optimized and consolidated codebase
   - 🐛 **Fixed** Explorer folders with game names no longer confused with actual games
   
+  <details>
+  <summary>View older versions</summary>
+
   ### v2.6.3
   - 🐛 **Fixed** Telegram/Explorer creating wrong folders from window titles
   - 📸 **Added** screenshot save notifications
   - 🔤 **Added** Unicode/Cyrillic support in popups
-
-  <details>
-  <summary>View older versions</summary>
-
+  
   ### v2.6.2
   - 🔔 **Notification System** — Visual popups + sound notifications
   - 🎯 **Contains Matching** — New `*pattern*` mode for flexible matching
