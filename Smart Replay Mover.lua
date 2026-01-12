@@ -3142,15 +3142,17 @@ local function register_notification_class()
             user32.UnregisterClassA(NOTIFICATION_CLASS_NAME, notification_hinstance)
         end)
 
-        notification_wndproc = ffi.cast("WNDPROC", notification_wndproc_handler)
-        CALLBACK_ANCHOR.wndproc = notification_wndproc
-
+        -- CRASH FIX: Do not use a Lua callback for the Window Procedure.
+        -- We pass the Windows Default function directly. This prevents the
+        -- re-entrancy crash in lua51.dll.
+        notification_wndproc = user32.DefWindowProcA
+        
         local bg_brush = gdi32.CreateSolidBrush(COLOR_BG)
 
         local wc = ffi.new("WNDCLASSEXA")
         wc.cbSize = ffi.sizeof("WNDCLASSEXA")
         wc.style = CS_HREDRAW + CS_VREDRAW
-        wc.lpfnWndProc = notification_wndproc
+        wc.lpfnWndProc = notification_wndproc -- Points to C function, not Lua
         wc.cbClsExtra = 0
         wc.cbWndExtra = 0
         wc.hInstance = notification_hinstance
@@ -3212,6 +3214,8 @@ local function notification_timer_callback()
             return
         end
 
+        local need_redraw = false
+
         if notification_fade_state == "in" then
             notification_alpha = notification_alpha + FADE_STEP
             if notification_alpha >= FADE_MAX_ALPHA then
@@ -3222,16 +3226,17 @@ local function notification_timer_callback()
             user32.SetLayeredWindowAttributes(notification_hwnd, 0, notification_alpha, LWA_ALPHA)
 
             if not notification_window_shown then
-                user32.InvalidateRect(notification_hwnd, nil, 0)
                 user32.ShowWindow(notification_hwnd, SW_SHOWNOACTIVATE)
                 notification_window_shown = true
             end
+            need_redraw = true
 
         elseif notification_fade_state == "visible" then
             if os.time() >= notification_end_time then
                 notification_fade_state = "out"
             end
-            user32.InvalidateRect(notification_hwnd, nil, 0)
+            -- Force redraw to keep text visible against DefWindowProc clearing it
+            need_redraw = true
 
         elseif notification_fade_state == "out" then
             notification_alpha = notification_alpha - FADE_STEP
@@ -3243,6 +3248,13 @@ local function notification_timer_callback()
                 return
             end
             user32.SetLayeredWindowAttributes(notification_hwnd, 0, notification_alpha, LWA_ALPHA)
+            need_redraw = true
+        end
+
+        -- CRASH FIX: Manually draw content from the timer thread
+        -- This is safe because it is sequential, not interrupt-driven
+        if need_redraw and notification_hwnd ~= nil then
+            draw_notification_content()
         end
     end)
 
@@ -3308,6 +3320,9 @@ local function show_notification(title, message)
         end
 
         user32.SetLayeredWindowAttributes(notification_hwnd, 0, 0, LWA_ALPHA)
+
+        -- CRASH FIX: Initial manual draw
+        draw_notification_content()
 
         obs.timer_add(notification_timer_callback, FADE_INTERVAL)
 
