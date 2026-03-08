@@ -6,7 +6,7 @@
 
   **Automatically organize your Replay Buffer clips, Recordings, and Screenshots into game-specific folders.**
 
-  [![Version](https://img.shields.io/badge/version-2.7.8-00d4aa.svg)](https://github.com/SlonickLab/Smart-Replay-Mover/releases)
+  [![Version](https://img.shields.io/badge/version-2.7.9-00d4aa.svg)](https://github.com/SlonickLab/Smart-Replay-Mover/releases)
   [![License](https://img.shields.io/badge/license-GPL%20v3-blue.svg)](LICENSE)
   [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6.svg)]()
   [![OBS](https://img.shields.io/badge/OBS-28.x+-302E31.svg)](https://obsproject.com/)
@@ -114,6 +114,8 @@
   |---------|-------------|
   | Show popup | Visual notification (Borderless/Windowed only) |
   | Play sound | Audio notification (works in Fullscreen) |
+  | Scale % | Resize popup for 4K/HiDPI monitors (100-300%) |
+  | Position | Choose popup corner: Top Right, Top Left, Bottom Right, Bottom Left |
   | Duration | How long popup stays visible (1-10 seconds) |
   
   ### 🎥 Advanced (FFmpeg)
@@ -131,6 +133,12 @@
   | Import | Load custom names from file |
   | Export | Save custom names to file |
 
+  ### 🔄 Buffer Control
+  | Setting | Description |
+  |---------|-------------|
+  | Auto-restart after save | Stops and restarts buffer after each save (prevents overlap) |
+  | Auto-start on launch | Automatically starts Replay Buffer when OBS opens |
+
   ---
 
   ## 🎮 Custom Names
@@ -146,7 +154,7 @@
   Matches if **all** keywords are present (AND logic). Prefix with `+`.
 
   ### Contains Mode
-  Space Marine 2 > Space Marine 2
+  `*Space Marine 2* > Space Marine 2`
   Matches if text is found **anywhere** in process name or window title. Wrap in `*`.
 
   > 💡 **Pro Tip:** Contains mode is perfect for games with version numbers that change with updates!
@@ -284,8 +292,14 @@
 
   ## 📋 Changelog
   
+  ### v2.7.9
+  - **🐛 Detection Fix** — Fixed `is_ignored()` false positives (`"obs"` no longer matches `"observer"`, `"code"` no longer matches `"barcode"`)
+  - **📍 Notification Position** — Choose popup corner: Top Right, Top Left, Bottom Right, Bottom Left
+  - **▶️ Auto-Start Buffer** — Option to automatically start Replay Buffer when OBS launches (Idea by ReiDaTecnologia, [Issue #11](https://github.com/SlonickLab/Smart-Replay-Mover/issues/11))
+  - **🔧 Dynamic Version** — Log message now uses `VERSION` variable instead of hardcoded string
+
   ### v2.7.8
-  - **🔄 Auto-Restart Buffer** — Option to automatically restart buffer after save to prevent overlapping clips (Idea be VoidNW)
+  - **🔄 Auto-Restart Buffer** — Option to automatically restart buffer after save to prevent overlapping clips (Idea by VoidNW)
   - **🛡️ Safe Logic** — Uses event-driven system to ensure file safety before restart
   - **🛠️ Buffer Control** — New settings section for buffer management
 
